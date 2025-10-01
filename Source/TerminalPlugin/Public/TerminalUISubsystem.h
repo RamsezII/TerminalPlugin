@@ -8,24 +8,35 @@
 UCLASS()
 class TERMINALPLUGIN_API UTerminalUISubsystem : public ULocalPlayerSubsystem
 {
-    GENERATED_BODY()
+	GENERATED_BODY()
 
 public:
-    // Crée et affiche le terminal
-    UFUNCTION(BlueprintCallable)
-    void ToggleTerminal();
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
+	UFUNCTION() void ToggleTerminal();
 
 private:
-    // Classe du widget (Blueprint que tu as fait -> WBP_Terminal)
-    TSubclassOf<UUserWidget> TerminalWidgetClass;
+	// ----- Assets chargés depuis le contenu du plugin
+	UPROPERTY() TSubclassOf<class UUserWidget> TerminalWidgetClass = nullptr;
+	UPROPERTY() class UInputAction* IA_Toggle = nullptr;
+	UPROPERTY() class UInputMappingContext* IMC_Terminal = nullptr;
 
-    // Instance courante
-    UPROPERTY()
-    UUserWidget* TerminalInstance;
+	// ----- Instances runtime
+	UPROPERTY(Transient) class UUserWidget* TerminalWidget = nullptr;
+	UPROPERTY(Transient) class UEnhancedInputComponent* PluginInputComponent = nullptr;
 
-    bool bIsVisible = false;
+	// ----- Helpers
+	void BindInput();
+	void ApplyInputMode(bool bUI);
 
-protected:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-    virtual void Deinitialize() override;
+	template<typename T> T* LoadObj(const TCHAR* Path)
+	{
+		return Cast<T>(StaticLoadObject(T::StaticClass(), nullptr, Path));
+	}
+
+	template<typename T> TSubclassOf<T> LoadClassObj(const TCHAR* Path)
+	{
+		return TSubclassOf<T>(StaticLoadClass(T::StaticClass(), nullptr, Path));
+	}
 };

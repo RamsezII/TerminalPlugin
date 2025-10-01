@@ -1,93 +1,157 @@
 #include "TerminalUISubsystem.h"
+
 #include "Blueprint/UserWidget.h"
 #include "Engine/LocalPlayer.h"
-#include "UObject/ConstructorHelpers.h"
+#include "GameFramework/PlayerController.h"
+
 #include "EnhancedInputSubsystems.h"
 #include "EnhancedInputComponent.h"
-#include "InputMappingContext.h"
 #include "InputAction.h"
+#include "InputMappingContext.h"
 
+// ---- Chemins: tu as mis "Inputs" (avec un s) dans ton plugin
+static const TCHAR* PATH_WBP = TEXT("/TerminalPlugin/UI/WBP_Terminal.WBP_Terminal_C");
+static const TCHAR* PATH_IA = TEXT("/TerminalPlugin/Inputs/IA_ToggleTerminal.IA_ToggleTerminal");
+static const TCHAR* PATH_IMC = TEXT("/TerminalPlugin/Inputs/IMC_Terminal.IMC_Terminal");
 
 void UTerminalUISubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-	Super::Initialize(Collection);
+    Super::Initialize(Collection);
 
-	// Cherche ton widget Blueprint dans le Content du plugin
-	static ConstructorHelpers::FClassFinder<UUserWidget> TerminalWidgetBP(
-		TEXT("/TerminalPlugin/UI/WBP_Terminal")
-	);
+    // Charger les assets du plugin (runtime-safe)
+    TerminalWidgetClass = LoadClassObj<UUserWidget>(PATH_WBP);
+    IA_Toggle = LoadObj<UInputAction>(PATH_IA);
+    IMC_Terminal = LoadObj<UInputMappingContext>(PATH_IMC);
 
-	if (TerminalWidgetBP.Succeeded())
-	{
-		TerminalWidgetClass = TerminalWidgetBP.Class;
-	}
+    if (!TerminalWidgetClass)
+        UE_LOG(LogTemp, Error, TEXT("[Terminal] Widget introuvable: %s"), PATH_WBP);
+    if (!IA_Toggle)
+        UE_LOG(LogTemp, Error, TEXT("[Terminal] IA introuvable: %s"), PATH_IA);
+    if (!IMC_Terminal)
+        UE_LOG(LogTemp, Error, TEXT("[Terminal] IMC introuvable: %s"), PATH_IMC);
 
-	// Charge ton IMC et IA
-	static ConstructorHelpers::FObjectFinder<UInputMappingContext> IMC_Terminal(
-		TEXT("/TerminalPlugin/Inputs/IMC_Terminal.IMC_Terminal")
-	);
-	static ConstructorHelpers::FObjectFinder<UInputAction> IA_Toggle(
-		TEXT("/TerminalPlugin/Inputs/IA_ToggleTerminal.IA_ToggleTerminal")
-	);
+    if (ULocalPlayer* LP = GetLocalPlayer())
+    {
+        // Ajouter l’Input Mapping Context (Enhanced Input)
+        if (UEnhancedInputLocalPlayerSubsystem* EIS = LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
+        {
+            if (IMC_Terminal)
+            {
+                EIS->AddMappingContext(IMC_Terminal, /*Priority*/1000);
+                UE_LOG(LogTemp, Log, TEXT("[Terminal] IMC ajouté (prio 1000)"));
+            }
+        }
 
-	if (IMC_Terminal.Succeeded() && IA_Toggle.Succeeded())
-	{
-		if (ULocalPlayer* LP = GetLocalPlayer())
-		{
-			if (UEnhancedInputLocalPlayerSubsystem* InputSubsystem =
-				LP->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>())
-			{
-				InputSubsystem->AddMappingContext(IMC_Terminal.Object, 1);
+        if (APlayerController* PC = LP->GetPlayerController(GetWorld()))
+        {
+            // Premier bind immédiat
+            BindInput();
 
-				// Bind l’action IA_ToggleTerminal -> ToggleTerminal()
-				if (APlayerController* PC = LP->GetPlayerController(LP->GetWorld()))
-				{
-					if (UEnhancedInputComponent* EIC =
-						Cast<UEnhancedInputComponent>(PC->InputComponent))
-					{
-						EIC->BindAction(IA_Toggle.Object, ETriggerEvent::Triggered, this,
-							&UTerminalUISubsystem::ToggleTerminal);
-					}
-				}
-			}
-		}
-	}
+            // Option "filet de sécurité" : rebinder au tick suivant
+            if (UWorld* W = PC->GetWorld())
+            {
+                FTimerHandle Tmp;
+                W->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateUObject(this, &UTerminalUISubsystem::BindInput));
+            }
+        }
+    }
 }
 
 void UTerminalUISubsystem::Deinitialize()
 {
-	if (TerminalInstance)
-	{
-		TerminalInstance->RemoveFromParent();
-		TerminalInstance = nullptr;
-	}
+    if (ULocalPlayer* LP = GetLocalPlayer())
+        if (APlayerController* PC = LP->GetPlayerController(GetWorld()))
+        {
+            if (PluginInputComponent && PluginInputComponent != PC->InputComponent)
+            {
+                PC->PopInputComponent(PluginInputComponent);
+            }
+            PluginInputComponent = nullptr;
+        }
 
-	Super::Deinitialize();
+    if (TerminalWidget)
+    {
+        TerminalWidget->RemoveFromParent();
+        TerminalWidget = nullptr;
+    }
+
+    Super::Deinitialize();
+}
+
+void UTerminalUISubsystem::BindInput()
+{
+    if (!IA_Toggle) return;
+
+    if (ULocalPlayer* LP = GetLocalPlayer())
+        if (APlayerController* PC = LP->GetPlayerController(GetWorld()))
+        {
+            // S’il y a déjà un EnhancedInputComponent sur le PC, utilise-le
+            if (!PluginInputComponent)
+            {
+                if (UEnhancedInputComponent* Existing = Cast<UEnhancedInputComponent>(PC->InputComponent))
+                {
+                    PluginInputComponent = Existing;
+                    UE_LOG(LogTemp, Log, TEXT("[Terminal] Bind sur EnhancedInputComponent existant"));
+                }
+                else
+                {
+                    // Sinon, on crée et push notre propre EnhancedInputComponent
+                    PluginInputComponent = NewObject<UEnhancedInputComponent>(PC, TEXT("TerminalPluginInputComponent"));
+                    PluginInputComponent->RegisterComponent();
+                    PC->PushInputComponent(PluginInputComponent);
+                    UE_LOG(LogTemp, Log, TEXT("[Terminal] EnhancedInputComponent créé+push"));
+                }
+            }
+
+            // (re)bind propre
+            PluginInputComponent->ClearActionBindings();
+            PluginInputComponent->BindAction(IA_Toggle, ETriggerEvent::Started, this, &UTerminalUISubsystem::ToggleTerminal);
+            UE_LOG(LogTemp, Log, TEXT("[Terminal] Action bindée (P -> ToggleTerminal)"));
+        }
+}
+
+void UTerminalUISubsystem::ApplyInputMode(bool bUI)
+{
+    if (ULocalPlayer* LP = GetLocalPlayer())
+        if (APlayerController* PC = LP->GetPlayerController(GetWorld()))
+        {
+            PC->bShowMouseCursor = bUI;
+            if (bUI)
+            {
+                FInputModeUIOnly Mode;
+                Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+                Mode.SetWidgetToFocus(TerminalWidget ? TerminalWidget->TakeWidget() : TSharedPtr<SWidget>());
+                PC->SetInputMode(Mode);
+            }
+            else
+            {
+                PC->SetInputMode(FInputModeGameOnly{});
+            }
+        }
 }
 
 void UTerminalUISubsystem::ToggleTerminal()
 {
-	if (!TerminalWidgetClass) return;
+    UE_LOG(LogTemp, Log, TEXT("[Terminal] ToggleTerminal()"));
 
-	ULocalPlayer* LP = GetLocalPlayer();
-	if (!LP) return;
+    if (!TerminalWidgetClass) return;
 
-	UWorld* World = LP->GetWorld();
-	if (!World) return;
+    if (ULocalPlayer* LP = GetLocalPlayer())
+        if (APlayerController* PC = LP->GetPlayerController(GetWorld()))
+        {
+            if (TerminalWidget)
+            {
+                TerminalWidget->RemoveFromParent();
+                TerminalWidget = nullptr;
+                ApplyInputMode(false);
+                return;
+            }
 
-	if (!TerminalInstance)
-	{
-		TerminalInstance = CreateWidget<UUserWidget>(World, TerminalWidgetClass);
-	}
-
-	if (bIsVisible)
-	{
-		TerminalInstance->RemoveFromParent();
-		bIsVisible = false;
-	}
-	else
-	{
-		TerminalInstance->AddToViewport(100); // Z-order haut
-		bIsVisible = true;
-	}
+            TerminalWidget = CreateWidget<UUserWidget>(PC, TerminalWidgetClass);
+            if (TerminalWidget)
+            {
+                TerminalWidget->AddToViewport(1000);
+                ApplyInputMode(true);
+            }
+        }
 }
