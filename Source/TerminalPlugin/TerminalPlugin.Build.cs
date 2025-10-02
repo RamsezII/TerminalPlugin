@@ -28,7 +28,6 @@ public class TerminalPlugin : ModuleRules
                 "Core",
                 "CoreUObject",
                 "Engine",
-                "InputCore",        // touches & enums
                 "UMG",               // UUserWidget, etc.
 				// ... add other public dependencies that you statically link with here ...
 			}
@@ -42,7 +41,6 @@ public class TerminalPlugin : ModuleRules
                 "Engine",
                 "Slate",
                 "SlateCore",
-                "EnhancedInput",     // Input Action + Mapping Context
 				// ... add private dependencies that you statically link with here ...	
 			}
             );

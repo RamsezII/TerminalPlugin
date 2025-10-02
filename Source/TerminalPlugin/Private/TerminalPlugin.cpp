@@ -1,20 +1,16 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #include "TerminalPlugin.h"
+#include "Modules/ModuleManager.h"
+#include "TerminalUISubsystem.h"
 
-#define LOCTEXT_NAMESPACE "FTerminalPluginModule"
+IMPLEMENT_MODULE(FTerminalPluginModule, TerminalPlugin)
 
 void FTerminalPluginModule::StartupModule()
 {
-	// This code will execute after your module is loaded into memory; the exact timing is specified in the .uplugin file per-module
+    UE_LOG(LogTemp, Log, TEXT("[Terminal] Module Startup"));
+    // Petite référence pour éviter tout stripping
+    ensure(UTerminalUISubsystem::StaticClass() != nullptr);
 }
-
 void FTerminalPluginModule::ShutdownModule()
 {
-	// This function may be called during shutdown to clean up your module.  For modules that support dynamic reloading,
-	// we call this function before unloading the module.
+    UE_LOG(LogTemp, Log, TEXT("[Terminal] Module Shutdown"));
 }
-
-#undef LOCTEXT_NAMESPACE
-	
-IMPLEMENT_MODULE(FTerminalPluginModule, TerminalPlugin)
